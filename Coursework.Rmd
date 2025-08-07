@@ -1,0 +1,220 @@
+```{r}
+surv <- read.csv("surv.csv")
+```
+
+Q1. i
+```{r}
+neg_log_likelihood <- function(params, ninit, nfin, times) {
+  phi1 <- params[1]
+  phi2 <- params[2]
+  sigma <- exp(params[3])  # Ensure sigma is positive
+  
+  log_nfin <- log(nfin)
+  log_ninit <- log(ninit)
+  
+  residuals <- log_nfin - (log_ninit + phi1 + phi2 * times)
+  
+  NLL <- (length(ninit) / 2) * log(2 * pi * sigma^2) + sum(residuals^2) / (2 * sigma^2)
+  
+  return(NLL)
+}
+
+```
+Q1. ii
+
+```{r}
+library(stats)
+# Extract columns from the data
+ninit <- surv$init
+nfin <- surv$fin
+times <- surv$times
+
+# Initial parameter guesses
+init_params <- c(0, 0, log(1))  # (phi1, phi2, log(sigma))
+
+# Use optim to find MLE estimates
+mle_fit <- optim(
+  par = init_params, 
+  fn = neg_log_likelihood, 
+  ninit = ninit, 
+  nfin = nfin, 
+  times = times, 
+  method = "BFGS", 
+  hessian = TRUE
+)
+
+# Extract estimated parameters
+phi1_hat <- mle_fit$par[1]
+phi2_hat <- mle_fit$par[2]
+sigma_hat <- exp(mle_fit$par[3])  # Convert back from log(sigma)
+
+# Print results
+cat("Estimated phi1:", phi1_hat, "\n")
+cat("Estimated phi2:", phi2_hat, "\n")
+cat("Estimated sigma:", sigma_hat, "\n")
+
+# Print Hessian matrix
+print(mle_fit$hessian)
+```
+
+Q1. iii
+```{r}
+# Load necessary packages
+library(ggplot2)
+
+# Compute fitted values using MLE estimates
+log_ninit <- log(ninit)
+fitted_log_nfin <- log_ninit + phi1_hat + phi2_hat * times
+fitted_nfin <- exp(fitted_log_nfin)  # Convert back from log scale
+
+# Compute standard error of predictions
+residuals <- log(surv$fin) - fitted_log_nfin
+sigma_hat <- sqrt(sum(residuals^2) / (length(residuals) - 2))  # Estimate sigma
+
+# Compute 95% Confidence Interval
+z_score <- qnorm(0.975)  # 1.96 for 95% CI
+conf_int <- z_score * sigma_hat
+print(sigma_hat)
+
+upper_bound <- exp(fitted_log_nfin + conf_int)
+lower_bound <- exp(fitted_log_nfin - conf_int)
+
+# Create a dataframe for plotting
+plot_data <- data.frame(
+  time = times,
+  observed = surv$fin,
+  fitted = fitted_nfin,
+  lower = lower_bound,
+  upper = upper_bound
+)
+
+# Plot the fit with confidence intervals
+ggplot(plot_data, aes(x = time)) +
+  geom_point(aes(y = observed), color = "blue", alpha = 0.6) +  # Observed data points
+  geom_point(aes(y = fitted), color = "red") +    # Fitted curve
+  geom_ribbon(aes(ymin = lower, ymax = upper), fill = "gray", alpha = 0.3) +  # CI band
+  labs(title = "Fitted Model with 95% Confidence Interval",
+       x = "Time (hours)",
+       y = "Final Number of Particles") +
+  theme_minimal()
+
+```
+
+```{r}
+# Load necessary packages
+library(ggplot2)
+library(car)  # For Durbin-Watson test
+
+# Compute residuals
+residuals <- log(surv$fin) - (log(surv$init) + phi1_hat + phi2_hat * surv$times)
+
+# --- 1. Normality Checks ---
+# Histogram of residuals
+ggplot(data.frame(residuals), aes(x = residuals)) +
+  geom_histogram(color = "black", fill = "blue", bins = 20, alpha = 0.6) +
+  labs(title = "Histogram of Residuals", x = "Residuals", y = "Frequency") +
+  theme_minimal()
+
+# QQ-plot of residuals
+qqnorm(residuals, main = "QQ Plot of Residuals(Marie's model)")
+qqline(residuals, col = "red")
+
+# Shapiro-Wilk test for normality
+shapiro.test(residuals)  # p-value < 0.05 suggests non-normality
+
+# --- 2. Homoscedasticity Check ---
+# Residuals vs. Fitted Values
+fitted_values <- log(surv$init) + phi1_hat + phi2_hat * surv$times
+
+ggplot(data.frame(fitted_values, residuals), aes(x = fitted_values, y = residuals)) +
+  geom_point(color = "blue", alpha = 0.6) +
+  geom_smooth(method = "lm", color = "red", se = FALSE) +
+  labs(title = "Residuals vs. Fitted Values", x = "Fitted Values", y = "Residuals") +
+  theme_minimal()
+
+# --- 3. Autocorrelation Check ---
+# Durbin-Watson test for residual correlation
+durbinWatsonTest(residuals)
+
+```
+
+Q2. 
+```{r}
+# Extract standard error of phi1 from Hessian matrix
+se_phi1 <- sqrt(solve(mle_fit$hessian)[1, 1])  # Variance of phi1 is first diagonal element
+
+# Compute Wald test statistic
+Z_phi1 <- phi1_hat / se_phi1
+
+# Compute two-tailed p-value
+p_value <- 2 * (1 - pnorm(abs(Z_phi1)))
+
+# Print results
+cat("Wald Test Statistic for H0: phi1 = 0:", Z_phi1, "\n")
+cat("p-value:", p_value, "\n")
+
+# Decision
+if (p_value < 0.05) {
+  cat("Reject H0: phi1 is significantly different from 0. Pierre's claim is not supported.\n")
+} else {
+  cat("Fail to reject H0: No significant evidence against Pierre's claim.\n")
+}
+
+```
+
+```{r}
+# Load data (assuming surv dataset is already loaded)
+n_init <- surv$init   # Initial number of particles
+n_fin  <- surv$fin    # Final number of particles
+times  <- surv$times  # Time elapsed
+
+# Negative Log-Likelihood function
+neg_log_likelihood <- function(params, n_init, n_fin, times) {
+  theta1 <- params[1]
+  theta2 <- params[2]
+  sigma  <- exp(params[3])  # Ensure positivity by exponentiation
+  
+  if (theta1 < 0 || sigma <= 0) return(Inf)  # Constraints
+  
+  # Compute predicted values
+  predicted <- n_init * (theta1 * exp(-theta2 * times))
+  
+  # Compute residuals
+  residuals <- (n_fin / n_init) - (theta1 * exp(-theta2 * times))
+  
+  # Compute Negative Log-Likelihood
+  N <- length(n_init)
+  nll <- (N / 2) * log(2 * pi * sigma^2) + sum((residuals^2) / (2 * sigma^2))
+  
+  return(nll)
+}
+
+# Initial parameter guesses (can be refined using Q1 estimates)
+init_params <- c(1, 0.1, log(sd(n_fin / n_init)))  # Log transformation ensures sigma > 0
+
+# Optimization using BFGS method
+fit <- optim(
+  par = init_params, 
+  fn = neg_log_likelihood, 
+  n_init = n_init, 
+  n_fin = n_fin, 
+  times = times, 
+  method = "BFGS", 
+  hessian = TRUE
+)
+
+# Extract parameter estimates
+theta1_hat <- fit$par[1]
+theta2_hat <- fit$par[2]
+sigma_hat  <- exp(fit$par[3])  # Undo log transformation
+
+# Print results
+cat("Estimated parameters:\n")
+cat("θ1 =", theta1_hat, "\n")
+cat("θ2 =", theta2_hat, "\n")
+cat("σ =", sigma_hat, "\n")
+
+# Store Hessian matrix for confidence intervals
+hessian_matrix <- fit$hessian
+
+```
